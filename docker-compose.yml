@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+  mongodb:
+    image: mongo:6.0.7
+    restart: always
+    environment:
+      MONGODB_USERNAME: ${MONGODB_USER}
+      MONGODB_PASSWORD: ${MONGODB_PASSWORD}
+    ports:
+      - "${MONGODB_PORT}:27017"
+
+  redis:
+    image: redis:7.0.12
+    restart: always
+    ports:
+      - "${REDIS_PORT}:6379"
+
+  app:
+    build:
+      context: .
+    restart: always
+    depends_on:
+      - mongodb
+      - redis
+    ports:
+      - "${PORT}:3001"
+    environment:
+      MONGO_HOST: '${MONGODB_HOST}'
+      MONGO_PORT: ${MONGODB_PORT}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+
+volumes:
+  mongodb_data:
