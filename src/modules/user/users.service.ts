@@ -30,8 +30,17 @@ export class UsersService {
     video: Express.Multer.File,
     userId: ObjectId,
   ): Promise<{ message: string }> {
-    const inputFilePath = video.path;
     const extensions = extname(video.originalname);
+    if (
+      extensions !== '.mp4' &&
+      extensions !== '.avi' &&
+      extensions !== '.mkv'
+    ) {
+      throw new HttpException(AppError.WRONG_TYPE, HttpStatus.BAD_REQUEST);
+    }
+
+    const inputFilePath = video.path;
+
     const randomName = crypto.randomBytes(4).toString('hex');
 
     if (!fs.existsSync('./uploads')) {
@@ -55,53 +64,34 @@ export class UsersService {
       } else {
         startTimeLast1Min = uploadVideoDurInMinutes - cutDuration;
 
-        const [firstSegmentPath, secondSegmentPath]: [string, string] =
-          await this.ffmpeg(
-            inputFilePath,
-            startTimeLast1Min,
-            outputDirFirst1min,
-            outputDirLast1min,
-          );
-
-        if (
-          fs.existsSync(firstSegmentPath) &&
-          fs.existsSync(secondSegmentPath)
-        ) {
-          fs.readFileSync(firstSegmentPath);
-          fs.readFileSync(secondSegmentPath);
-
-          await this.usersRepository.creatVideo(
-            userId,
-            video,
-            firstSegmentPath,
-            randomName,
-            extensions,
-          );
-
-          const cutVideo = {
-            id: userId,
-            name: `secondSegment${randomName}`,
-            originName: video.originalname,
-            type: extensions,
-            path: secondSegmentPath,
-            timeStamp: moment().unix(),
-          };
-
-          await this.redis.sAdd('users', JSON.stringify(cutVideo));
-        } else {
-          if (!fs.existsSync(firstSegmentPath)) {
-            throw new HttpException(
-              `${AppError.FILE_DOES_NOT_EXIST} ${firstSegmentPath}`,
-              HttpStatus.NOT_FOUND,
+        await this.ffmpeg(
+          inputFilePath,
+          startTimeLast1Min,
+          outputDirFirst1min,
+          outputDirLast1min,
+        )
+          .then(async ([firstSegmentPath, secondSegmentPath]) => {
+            await this.usersRepository.createVideo(
+              userId,
+              video,
+              firstSegmentPath,
+              randomName,
+              extensions,
             );
-          }
-          if (!fs.existsSync(secondSegmentPath)) {
-            throw new HttpException(
-              `${AppError.FILE_DOES_NOT_EXIST} ${secondSegmentPath}`,
-              HttpStatus.NOT_FOUND,
-            );
-          }
-        }
+            const cutVideo = {
+              id: userId,
+              name: `secondSegment${randomName}`,
+              originName: video.originalname,
+              type: extensions,
+              path: secondSegmentPath,
+              timeStamp: moment().unix(),
+            };
+
+            await this.redis.sAdd('users', JSON.stringify(cutVideo));
+          })
+          .catch(async (error) => {
+            throw new HttpException(error, HttpStatus.INTERNAL_SERVER_ERROR);
+          });
       }
     } catch (error) {
       throw new InternalServerErrorException(AppError.ERROR_FFMPEG);
@@ -127,30 +117,24 @@ export class UsersService {
     return new Promise<[string, string]>((resolve, reject) => {
       const firstSegmentProcess = ffmpeg(inputFilePath)
         .setStartTime('00:00:00')
-        .setDuration(1)
+        .setDuration(60)
         .output(outputDirFirst1min)
         .on('end', () => {
           const secondSegmentProcess = ffmpeg(inputFilePath)
             .setStartTime(startTime)
-            .setDuration(1)
+            .setDuration(60)
             .output(outputDirLast1min)
             .on('end', () => {
               resolve([outputDirFirst1min, outputDirLast1min]);
             })
             .on('error', () => {
-              reject(
-                new InternalServerErrorException(
-                  AppError.ERROR_SECOND_TRIMMING,
-                ),
-              );
+              reject(AppError.ERROR_SECOND_TRIMMING);
             });
 
           secondSegmentProcess.run();
         })
         .on('error', () => {
-          reject(
-            new InternalServerErrorException(AppError.ERROR_FIRST_TRIMMING),
-          );
+          reject(AppError.ERROR_FIRST_TRIMMING);
         });
 
       firstSegmentProcess.run();

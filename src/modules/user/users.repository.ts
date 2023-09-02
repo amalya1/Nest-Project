@@ -12,7 +12,7 @@ export class UsersRepository {
     @InjectModel('Video') private readonly videoModel: Model<Video>,
   ) {}
 
-  async creatVideo(userId, video, path, name, type): Promise<void | never> {
+  async createVideo(userId, video, path, name, type): Promise<void | never> {
     await this.videoModel.create({
       name: `firstSegment${name}`,
       userId,
